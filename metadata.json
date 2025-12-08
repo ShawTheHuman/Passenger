@@ -1,0 +1,7 @@
+{
+  "name": "The Passenger",
+  "description": "A high-stakes text-based survival thriller where you are trapped in a car with a stranger. Use your wits and real-world surroundings to escape.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
