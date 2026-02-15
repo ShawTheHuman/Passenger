@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Send, AlertTriangle, Eye, Car, Play, Skull, Search, MessageSquare, Volume2, VolumeX, Binoculars, Loader2, Sparkles } from 'lucide-react';
-import { GameState, Message, GameStatus, LocationData } from './types';
+import { Send, AlertTriangle, Eye, Car, Play, Skull, Search, MessageSquare, Volume2, VolumeX, Binoculars, Loader2, Sparkles, Shield, AlertCircle } from 'lucide-react';
+import { GameState, Message, GameStatus, LocationData, Recommendation } from './types';
 import { getPlayerIntuition, getLocationContext, processGameTurn, generateStartScenario } from './services/geminiService';
 import { audioService } from './services/audioService';
 import { ChatInterface } from './components/ChatInterface';
@@ -17,7 +17,6 @@ const STORAGE_KEY = 'passenger_game_save';
 export default function App() {
   const [status, setStatus] = useState<GameStatus>(GameStatus.START);
   const [input, setInput] = useState('');
-  const [isObservationMode, setIsObservationMode] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   
@@ -34,7 +33,11 @@ export default function App() {
     },
     history: [],
     inventory: [],
-    recommendations: ["Ask where we're going", "Look out the window", "Check the door lock"],
+    recommendations: [
+        { text: "Ask where we're going", type: "safe" },
+        { text: "Look out the window", type: "observation" },
+        { text: "Check the door lock", type: "risky" }
+    ],
     isLoading: false,
     loadingStep: '',
     totalTimeSeconds: 0
@@ -111,7 +114,11 @@ export default function App() {
         },
         history: initialHistory,
         inventory: [],
-        recommendations: ["Ask where we're going", "Look out the window", "Stay silent"],
+        recommendations: [
+            { text: "Ask where we're going", type: "safe" },
+            { text: "Scan the interior", type: "observation" },
+            { text: "Stay silent", type: "safe" }
+        ],
         isLoading: false,
         loadingStep: '',
         totalTimeSeconds: 0
@@ -174,7 +181,7 @@ export default function App() {
       if (inputEl) inputEl.focus();
   };
 
-  const executeTurn = async (turnInput: string, isObservation: boolean) => {
+  const executeTurn = async (turnInput: string) => {
     if (!turnInput.trim() || gameState.isLoading || gameState.isGameOver) return;
 
     const userMsg: Message = { role: 'user', content: turnInput, timestamp: Date.now() };
@@ -194,8 +201,7 @@ export default function App() {
     const intuitionPromise = getPlayerIntuition(
       turnInput, 
       gameState.suspicion, 
-      gameState.attention, 
-      isObservation
+      gameState.attention
     );
     
     // 2. MAIN LOGIC
@@ -217,8 +223,7 @@ export default function App() {
             lat: gameState.currentLocation.latitude,
             lng: gameState.currentLocation.longitude
           },
-          gameState.inventory,
-          isObservation
+          gameState.inventory
         )
       ]);
 
@@ -335,11 +340,7 @@ export default function App() {
   };
 
   const handleSend = () => {
-      executeTurn(input, isObservationMode);
-  };
-
-  const handleLookAround = () => {
-      executeTurn("I carefully look around the car interior and out the window for potential items or escape routes.", true);
+      executeTurn(input);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -347,6 +348,34 @@ export default function App() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // Helper to render recommendation buttons with styles based on type
+  const renderRecommendation = (rec: Recommendation, idx: number) => {
+      let styles = "border-gray-700 hover:border-emerald-700 text-gray-300 hover:text-emerald-100 bg-gray-800 hover:bg-emerald-900";
+      let icon = <Sparkles size={12} className="text-gray-500" />;
+      
+      if (rec.type === 'risky') {
+          styles = "border-red-900/40 hover:border-red-500 text-red-300 hover:text-red-100 bg-red-900/10 hover:bg-red-900/40";
+          icon = <AlertCircle size={12} className="text-red-500" />;
+      } else if (rec.type === 'observation') {
+          styles = "border-blue-900/40 hover:border-blue-500 text-blue-300 hover:text-blue-100 bg-blue-900/10 hover:bg-blue-900/40";
+          icon = <Search size={12} className="text-blue-500" />;
+      } else if (rec.type === 'safe') {
+          styles = "border-emerald-900/40 hover:border-emerald-500 text-emerald-300 hover:text-emerald-100 bg-emerald-900/10 hover:bg-emerald-900/40";
+          icon = <Shield size={12} className="text-emerald-500" />;
+      }
+
+      return (
+        <button
+            key={idx}
+            onClick={() => executeTurn(rec.text)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all text-xs group ${styles}`}
+        >
+            {icon}
+            {rec.text}
+        </button>
+      );
   };
 
   // Start Screen
@@ -497,69 +526,25 @@ export default function App() {
           {/* Quick Actions / Recommendations */}
           <div className="mb-4 flex flex-wrap gap-2 justify-center md:justify-start">
              {!gameState.isLoading && gameState.recommendations && gameState.recommendations.map((rec, idx) => (
-               <button
-                 key={idx}
-                 onClick={() => executeTurn(rec, false)}
-                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-800 hover:bg-emerald-900 border border-gray-700 hover:border-emerald-700 transition-all text-xs text-gray-300 hover:text-emerald-100 group"
-               >
-                 <Sparkles size={12} className="text-gray-500 group-hover:text-emerald-400" />
-                 {rec}
-               </button>
+                renderRecommendation(rec, idx)
              ))}
           </div>
 
           <div className="relative max-w-4xl mx-auto flex gap-3 items-end">
-             {/* Observation Mode Toggle */}
-            <div className="flex flex-col gap-2">
-                <button
-                    onClick={handleLookAround}
-                    disabled={gameState.isLoading}
-                    className="flex-shrink-0 w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-all border bg-emerald-900/10 border-emerald-900/40 text-emerald-500 hover:bg-emerald-900/20"
-                    title="Look Around carefully"
-                >
-                    <Binoculars size={20} />
-                    <span className="text-[9px] uppercase font-bold tracking-wider">Look</span>
-                </button>
-             </div>
-
-             <button
-                onClick={() => setIsObservationMode(!isObservationMode)}
-                disabled={gameState.isLoading}
-                className={`flex-shrink-0 w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-all border ${
-                  isObservationMode 
-                    ? 'bg-blue-900/20 border-blue-500 text-blue-400' 
-                    : 'bg-[#111] border-gray-800 text-gray-400 hover:bg-gray-800'
-                }`}
-                title={isObservationMode ? "Switch to Action/Talk" : "Switch to Observation Mode"}
-              >
-                {isObservationMode ? <Search size={20} /> : <MessageSquare size={20} />}
-                <span className="text-[9px] uppercase font-bold tracking-wider">
-                  {isObservationMode ? "Scan" : "Act"}
-                </span>
-              </button>
-
             <div className="flex-1 relative">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isObservationMode ? "What are you examining? (e.g. 'the glovebox')" : "What do you do? (e.g., 'Ask for water', 'Use pocket knife')"}
+                placeholder={"What do you do? (e.g., 'Look around', 'Ask him a question', 'Check the door')"}
                 disabled={gameState.isLoading}
-                className={`w-full bg-[#111] text-gray-100 rounded-xl pl-4 pr-12 py-4 focus:outline-none focus:ring-2 border transition-all disabled:opacity-50 ${
-                  isObservationMode 
-                    ? 'border-blue-900/50 focus:ring-blue-500 placeholder-blue-300/30' 
-                    : 'border-gray-800 focus:ring-emerald-900 placeholder-gray-600'
-                }`}
+                className="w-full bg-[#111] text-gray-100 rounded-xl pl-4 pr-12 py-4 focus:outline-none focus:ring-2 border transition-all disabled:opacity-50 border-gray-800 focus:ring-emerald-900 placeholder-gray-600"
               />
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || gameState.isLoading}
-                className={`absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center rounded-lg transition-all disabled:bg-transparent disabled:text-gray-700 ${
-                  isObservationMode
-                   ? 'bg-blue-900/30 text-blue-400 hover:bg-blue-800 hover:text-white'
-                   : 'bg-gray-800 text-gray-300 hover:bg-emerald-700 hover:text-white'
-                }`}
+                className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center rounded-lg transition-all disabled:bg-transparent disabled:text-gray-700 bg-gray-800 text-gray-300 hover:bg-emerald-700 hover:text-white"
               >
                 <Send size={18} />
               </button>

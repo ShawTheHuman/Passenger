@@ -24,6 +24,11 @@ export interface Item {
   description: string;
 }
 
+export interface Recommendation {
+  text: string;
+  type: 'risky' | 'safe' | 'observation';
+}
+
 export interface GameState {
   suspicion: number; // 0-100
   attention: number; // 0-100 (Goal: 100)
@@ -32,7 +37,7 @@ export interface GameState {
   currentLocation: LocationData;
   history: Message[];
   inventory: Item[];
-  recommendations: string[];
+  recommendations: Recommendation[];
   isLoading: boolean;
   loadingStep: string; // 'thinking' | 'scanning' | 'traveling'
   totalTimeSeconds: number;
@@ -41,7 +46,7 @@ export interface GameState {
 export interface TurnResponse {
   strangerDialogue: string;
   narrativeAction: string;
-  recommendations: string[];
+  recommendations: Recommendation[];
   suspicionChange: number;
   attentionChange: number;
   newItem?: Item;

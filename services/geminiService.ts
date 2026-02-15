@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { GroundingLink, LocationData, TurnResponse, Item } from "../types";
+import { GroundingLink, LocationData, TurnResponse, Item, Recommendation } from "../types";
 
 // Helper to get API key
 const getApiKey = () => {
@@ -70,15 +70,14 @@ export const generateStartScenario = async (): Promise<{
 export const getPlayerIntuition = async (
   lastPlayerInput: string,
   currentSuspicion: number,
-  currentAttention: number,
-  isObservation: boolean = false
+  currentAttention: number
 ): Promise<string> => {
   try {
     const model = 'gemini-2.5-flash';
     const prompt = `
       You are the inner voice of a kidnapped victim in a car.
       Current Situation: Suspicion Level: ${currentSuspicion}%, Attention/Escape Progress: ${currentAttention}%.
-      The player just did/said: "${lastPlayerInput}" (Intent: ${isObservation ? 'OBSERVATION/INSPECTION' : 'ACTION/DIALOGUE'}).
+      The player just did/said: "${lastPlayerInput}".
       
       Give a very brief, visceral, internal reaction (1 sentence). 
       
@@ -174,8 +173,7 @@ export const processGameTurn = async (
   playerInput: string,
   locationContext: string,
   currentStats: { suspicion: number; attention: number; lat: number; lng: number },
-  currentInventory: Item[],
-  isObservation: boolean = false
+  currentInventory: Item[]
 ): Promise<TurnResponse> => {
   try {
     // Switched to gemini-2.5-flash for better stability with Thinking Config
@@ -197,7 +195,6 @@ export const processGameTurn = async (
       ${history.slice(-3).join('\n')}
       
       Player Input: "${playerInput}"
-      Input Mode: ${isObservation ? "OBSERVATION (Detailed Inspection)" : "NORMAL (Dialogue/Action)"}
       
       BEHAVIORAL TELLS (MANDATORY):
       The narrativeAction MUST describe the Stranger's physical state based on Suspicion level:
@@ -209,23 +206,28 @@ export const processGameTurn = async (
       If the player's move is RISKY, describe a sudden "micro-expression" or "tell" (e.g., a flinch, a sharp glance) immediately.
 
       Task:
-      1. Analyze the player's input.
-         - If OBSERVATION (General "Look Around"): Provide a cinematic description of the car interior and "Tells" of the stranger. HINT at 2-3 interactable objects.
-         - If OBSERVATION (Specific Search): If they search a specific spot, consider giving an ITEM (newItem).
-         - If NORMAL: React to dialogue or physical actions.
-         - If they USE an item: Describe the effect.
+      1. Analyze the player's input. Detect if it is:
+         - OBSERVATION: Looking around, checking environment. (Result: detailed description, low/no suspicion change).
+         - ACTION: Trying to open door, grabbing wheel, attacking. (Result: Risky, high suspicion change).
+         - DIALOGUE: Talking to stranger. (Result: Depends on topic).
          
       2. Determine "The Stranger's" reaction using the "Tells" logic above.
       3. Decide if the car moves to new coordinates.
       4. Update Suspicion and Attention meters.
       5. Select a Sound Cue if relevant.
-      6. Provide 3 Recommendations for the player's next move.
+      6. Provide 3 Recommendations for the player's next move. 
+         IMPORTANT: YOU MUST CLASSIFY EACH RECOMMENDATION TYPE.
+         Types: 'risky' (Might raise suspicion but effective), 'safe' (Calm, defusing), 'observation' (Gathering info).
       
       Output JSON ONLY with this schema:
       {
         "strangerDialogue": "What the stranger says.",
         "narrativeAction": "Description of what happens, INCLUDING PHYSICAL TELLS.",
-        "recommendations": ["Option 1", "Option 2", "Option 3"],
+        "recommendations": [
+          { "text": "Action description", "type": "risky" | "safe" | "observation" },
+          { "text": "Action description", "type": "risky" | "safe" | "observation" },
+          { "text": "Action description", "type": "risky" | "safe" | "observation" }
+        ],
         "suspicionChange": integer,
         "attentionChange": integer,
         "newItem": { "id": "unique_id", "name": "Item Name", "description": "Short description" } | null,
@@ -265,12 +267,27 @@ export const processGameTurn = async (
     
     const data = JSON.parse(cleanJson);
 
+    // Sanitize and backup recommendations
+    let safeRecommendations: Recommendation[] = [];
+    if (Array.isArray(data.recommendations)) {
+        safeRecommendations = data.recommendations.map((rec: any) => {
+             if (typeof rec === 'string') return { text: rec, type: 'safe' };
+             return rec;
+        });
+    } else {
+        safeRecommendations = [
+            { text: "Stay quiet", type: "safe" },
+            { text: "Look out window", type: "observation" },
+            { text: "Ask about destination", type: "risky" }
+        ];
+    }
+
     // Sanitize numeric inputs
     return {
         ...data,
         suspicionChange: typeof data.suspicionChange === 'number' ? data.suspicionChange : parseInt(data.suspicionChange || '0'),
         attentionChange: typeof data.attentionChange === 'number' ? data.attentionChange : parseInt(data.attentionChange || '0'),
-        recommendations: Array.isArray(data.recommendations) ? data.recommendations : []
+        recommendations: safeRecommendations
     } as TurnResponse;
 
   } catch (error) {
@@ -278,7 +295,11 @@ export const processGameTurn = async (
     return {
       strangerDialogue: "Don't try anything stupid.",
       narrativeAction: "He grips the steering wheel tighter. The radio buzzes with static.",
-      recommendations: ["Stay silent", "Look out the window", "Ask a question"],
+      recommendations: [
+          { text: "Stay silent", type: "safe" },
+          { text: "Look around", type: "observation" },
+          { text: "Ask a question", type: "safe" }
+      ],
       suspicionChange: 5,
       attentionChange: 0,
       soundCue: 'engine_rev'
